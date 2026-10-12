@@ -1,0 +1,15 @@
+import path from 'path';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export const config = {
+  port: parseInt(process.env.PORT || '4000', 10),
+  dbPath: process.env.DB_PATH || path.resolve(__dirname, '../../../data/reconciliation.db'),
+  defaultEvaluationDate: process.env.EVALUATION_DATE || '2025-08-15',
+  corsOrigin: process.env.CORS_ORIGIN || '*'
+};
