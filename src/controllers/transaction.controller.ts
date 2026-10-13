@@ -180,4 +180,25 @@ export class TransactionController {
       res.status(500).json({ success: false, error: 'Failed to export CSV' });
     }
   }
+
+  public static async getAllSettlements(req: Request, res: Response): Promise<void> {
+    try {
+      const db = getDatabase();
+      const settlements = db.prepare(
+        'SELECT * FROM settlement_history ORDER BY settlement_date DESC, processed_at DESC'
+      ).all() as SettlementHistory[];
+
+      res.status(200).json({
+        success: true,
+        total: settlements.length,
+        data: settlements
+      });
+    } catch (err: any) {
+      console.error('Fetch all settlements error:', err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to fetch settlements: ${err.message}`
+      });
+    }
+  }
 }
