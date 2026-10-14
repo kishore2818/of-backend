@@ -12,6 +12,22 @@ export function createApp(): express.Application {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Root welcome endpoint
+  app.get('/', (req, res) => {
+    res.status(200).json({
+      name: 'Transaction Reconciliation Backend API',
+      status: 'online',
+      version: '1.0.0',
+      health: '/health',
+      endpoints: {
+        summary: '/dashboard/summary',
+        transactions: '/transactions',
+        exceptions: '/exceptions',
+        reconciliation_runs: '/reconciliation-runs'
+      }
+    });
+  });
+
   // Health check
   app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });

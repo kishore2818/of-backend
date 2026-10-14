@@ -3,6 +3,7 @@ import { getDatabase } from '../db/index.js';
 import { IssueDetectionService } from '../services/issue-detection.service.js';
 import { SettlementHistory, Transaction } from '../types/index.js';
 import { toCents, fromCents, formatMoney } from '../utils/money.js';
+import { SettlementService } from '../services/settlement.service.js';
 
 function getStatusDefinition(status: string): string {
   switch (status) {
@@ -439,6 +440,297 @@ export class TransactionController {
       res.status(500).json({
         success: false,
         error: `Failed to fetch settlements: ${err.message}`
+      });
+    }
+  }
+
+  public static async updateTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const db = getDatabase();
+      const { id } = req.params;
+      const {
+        merchant_name,
+        transaction_amount,
+        currency,
+        status,
+        lifecycle_id,
+        transaction_date
+      } = req.body;
+
+      // Verify transaction exists
+      const existing = db.prepare('SELECT * FROM transactions WHERE transaction_id = ?').get(id) as Transaction | undefined;
+      if (!existing) {
+        res.status(404).json({ success: false, error: `Transaction ${id} not found.` });
+        return;
+      }
+
+      const newMerchant = merchant_name !== undefined ? String(merchant_name).trim() : existing.merchant_name;
+      const newAmount = transaction_amount !== undefined ? Number(transaction_amount) : existing.transaction_amount;
+      const newCurrency = currency !== undefined ? String(currency).trim().toUpperCase() : existing.currency;
+      const newStatus = status !== undefined ? String(status).trim().toUpperCase() : existing.status;
+      const newLifecycleId = lifecycle_id !== undefined ? (String(lifecycle_id).trim() || null) : existing.lifecycle_id;
+      const newDate = transaction_date !== undefined ? String(transaction_date).trim() : existing.transaction_date;
+
+      if (isNaN(newAmount) || newAmount <= 0) {
+        res.status(400).json({ success: false, error: 'Transaction amount must be a positive number.' });
+        return;
+      }
+
+      // Update primary fields
+      db.prepare(`
+        UPDATE transactions
+        SET merchant_name = ?,
+            transaction_amount = ?,
+            currency = ?,
+            status = ?,
+            lifecycle_id = ?,
+            transaction_date = ?
+        WHERE transaction_id = ?
+      `).run(newMerchant, newAmount, newCurrency, newStatus, newLifecycleId, newDate, id);
+
+      // Recalculate settlement status using SettlementService
+      const settlementService = new SettlementService(db);
+      settlementService.recalculateTransaction(id);
+
+      const updated = db.prepare('SELECT * FROM transactions WHERE transaction_id = ?').get(id) as Transaction;
+
+      res.status(200).json({
+        success: true,
+        message: `Transaction ${id} updated successfully and settlement status recalculated.`,
+        data: updated
+      });
+    } catch (err: any) {
+      console.error('Update transaction error:', err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to update transaction: ${err.message}`
+      });
+    }
+  }
+
+  public static async createTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const db = getDatabase();
+      const {
+        transaction_id,
+        account_id,
+        merchant_name,
+        transaction_amount,
+        currency = 'USD',
+        status = 'COMPLETED',
+        lifecycle_id,
+        transaction_date
+      } = req.body;
+
+      if (!transaction_id || !String(transaction_id).trim()) {
+        res.status(400).json({ success: false, error: 'Transaction ID is required.' });
+        return;
+      }
+      if (!account_id || !String(account_id).trim()) {
+        res.status(400).json({ success: false, error: 'Account ID is required.' });
+        return;
+      }
+      if (!merchant_name || !String(merchant_name).trim()) {
+        res.status(400).json({ success: false, error: 'Merchant name is required.' });
+        return;
+      }
+      const numAmount = Number(transaction_amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        res.status(400).json({ success: false, error: 'Transaction amount must be a positive number.' });
+        return;
+      }
+
+      const cleanTxnId = String(transaction_id).trim().toUpperCase();
+      const existing = db.prepare('SELECT transaction_id FROM transactions WHERE transaction_id = ?').get(cleanTxnId);
+      if (existing) {
+        res.status(400).json({ success: false, error: `Transaction ID ${cleanTxnId} already exists.` });
+        return;
+      }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const txnDate = transaction_date && String(transaction_date).trim() ? String(transaction_date).trim() : todayStr;
+      const cleanLifecycle = lifecycle_id && String(lifecycle_id).trim() ? String(lifecycle_id).trim().toUpperCase() : null;
+      const cleanStatus = String(status).trim().toUpperCase();
+      const cleanCurrency = String(currency).trim().toUpperCase();
+      const cleanAccount = String(account_id).trim().toUpperCase();
+      const cleanMerchant = String(merchant_name).trim();
+
+      const initialSettlementStatus = (cleanStatus === 'FAILED' || cleanStatus === 'DECLINED') ? 'NOT_APPLICABLE' : 'PENDING';
+
+      db.prepare(`
+        INSERT INTO transactions (
+          transaction_id, lifecycle_id, account_id, merchant_name,
+          transaction_date, transaction_amount, currency, status,
+          settlement_status, total_settled_amount, last_settlement_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, NULL)
+      `).run(
+        cleanTxnId,
+        cleanLifecycle,
+        cleanAccount,
+        cleanMerchant,
+        txnDate,
+        numAmount,
+        cleanCurrency,
+        cleanStatus,
+        initialSettlementStatus
+      );
+
+      // In case any settlements previously existed with this lifecycle_id or composite match
+      const settlementService = new SettlementService(db);
+      settlementService.recalculateTransaction(cleanTxnId);
+
+      const created = db.prepare('SELECT * FROM transactions WHERE transaction_id = ?').get(cleanTxnId) as Transaction;
+
+      res.status(201).json({
+        success: true,
+        message: `Transaction ${cleanTxnId} created successfully.`,
+        data: created
+      });
+    } catch (err: any) {
+      console.error('Create transaction error:', err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to create transaction: ${err.message}`
+      });
+    }
+  }
+
+  public static async deleteTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const db = getDatabase();
+      const { id } = req.params;
+
+      const existing = db.prepare('SELECT transaction_id FROM transactions WHERE transaction_id = ?').get(id);
+      if (!existing) {
+        res.status(404).json({ success: false, error: `Transaction ${id} not found.` });
+        return;
+      }
+
+      // Detach any matched settlement records so they become UNMATCHED
+      db.prepare('UPDATE settlement_history SET transaction_id = NULL WHERE transaction_id = ?').run(id);
+      db.prepare('DELETE FROM transactions WHERE transaction_id = ?').run(id);
+
+      res.status(200).json({
+        success: true,
+        message: `Transaction ${id} deleted successfully.`
+      });
+    } catch (err: any) {
+      console.error('Delete transaction error:', err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to delete transaction: ${err.message}`
+      });
+    }
+  }
+
+  public static async bulkCreateTransactions(req: Request, res: Response): Promise<void> {
+    try {
+      const db = getDatabase();
+      const { transactions } = req.body;
+
+      if (!Array.isArray(transactions) || transactions.length === 0) {
+        res.status(400).json({ success: false, error: 'A non-empty transactions array is required.' });
+        return;
+      }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const settlementService = new SettlementService(db);
+      let insertedCount = 0;
+      let skippedCount = 0;
+      const insertedIds: string[] = [];
+      const errors: string[] = [];
+
+      const insertTxnStmt = db.prepare(`
+        INSERT INTO transactions (
+          transaction_id, lifecycle_id, account_id, merchant_name,
+          transaction_date, transaction_amount, currency, status,
+          settlement_status, total_settled_amount, last_settlement_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, NULL)
+      `);
+
+      const checkExistingStmt = db.prepare('SELECT transaction_id FROM transactions WHERE transaction_id = ?');
+
+      const runBatch = db.transaction(() => {
+        for (let i = 0; i < transactions.length; i++) {
+          const t = transactions[i];
+          const rawId = t.transaction_id || t.id || t['Transaction ID'] || t['Txn ID'];
+          if (!rawId || !String(rawId).trim()) {
+            errors.push(`Row ${i + 1}: Missing transaction_id`);
+            continue;
+          }
+
+          const cleanTxnId = String(rawId).trim().toUpperCase();
+          const existing = checkExistingStmt.get(cleanTxnId);
+          if (existing) {
+            skippedCount++;
+            continue;
+          }
+
+          const rawAmount = t.transaction_amount !== undefined ? t.transaction_amount : (t.amount !== undefined ? t.amount : t['Amount']);
+          const numAmount = Number(String(rawAmount).replace(/[^0-9.-]+/g, ''));
+          if (isNaN(numAmount) || numAmount <= 0) {
+            errors.push(`Row ${i + 1} (${cleanTxnId}): Invalid positive amount "${rawAmount}"`);
+            continue;
+          }
+
+          const rawAccount = t.account_id || t.account || t['Account ID'] || 'ACC100';
+          const cleanAccount = String(rawAccount).trim().toUpperCase();
+
+          const rawMerchant = t.merchant_name || t.merchant || t['Merchant Name'] || 'Unknown Merchant';
+          const cleanMerchant = String(rawMerchant).trim();
+
+          const rawDate = t.transaction_date || t.date || t['Transaction Date'] || t['Date'] || todayStr;
+          const txnDate = String(rawDate).trim();
+
+          const rawLifecycle = t.lifecycle_id || t.lifecycle || t['Lifecycle ID'] || null;
+          const cleanLifecycle = rawLifecycle && String(rawLifecycle).trim() ? String(rawLifecycle).trim().toUpperCase() : null;
+
+          const rawStatus = t.status || t['Status'] || 'COMPLETED';
+          const cleanStatus = String(rawStatus).trim().toUpperCase();
+
+          const rawCurrency = t.currency || t['Currency'] || 'USD';
+          const cleanCurrency = String(rawCurrency).trim().toUpperCase();
+
+          const initialSettlementStatus = (cleanStatus === 'FAILED' || cleanStatus === 'DECLINED') ? 'NOT_APPLICABLE' : 'PENDING';
+
+          insertTxnStmt.run(
+            cleanTxnId,
+            cleanLifecycle,
+            cleanAccount,
+            cleanMerchant,
+            txnDate,
+            numAmount,
+            cleanCurrency,
+            cleanStatus,
+            initialSettlementStatus
+          );
+
+          insertedIds.push(cleanTxnId);
+          insertedCount++;
+        }
+      });
+
+      runBatch();
+
+      // Recalculate settlement statuses for newly inserted transactions against existing settlement_history
+      for (const id of insertedIds) {
+        try {
+          settlementService.recalculateTransaction(id);
+        } catch (e) {}
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Bulk import completed: ${insertedCount} inserted, ${skippedCount} duplicate IDs skipped.`,
+        insertedCount,
+        skippedCount,
+        errors
+      });
+    } catch (err: any) {
+      console.error('Bulk create transactions error:', err);
+      res.status(500).json({
+        success: false,
+        error: `Failed to bulk import transactions: ${err.message}`
       });
     }
   }

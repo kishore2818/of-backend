@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { DashboardSummary, Transaction } from '../types/index.js';
+import { DashboardSummary, SettlementStatus, Transaction } from '../types/index.js';
 import { IssueDetectionService } from './issue-detection.service.js';
 import { fromCents, toCents } from '../utils/money.js';
 
@@ -39,7 +39,54 @@ export class DashboardService {
 
       if (txnIds.length > 0) {
         const placeholders = txnIds.map(() => '?').join(',');
-        allTxns = this.db.prepare(`SELECT * FROM transactions WHERE transaction_id IN (${placeholders})`).all(...txnIds) as Transaction[];
+        const rawTxns = this.db.prepare(`SELECT * FROM transactions WHERE transaction_id IN (${placeholders})`).all(...txnIds) as Transaction[];
+
+        // ── Point-in-time recalculation ──────────────────────────────────────
+        // When viewing a specific run, recalculate each transaction's settlement
+        // status using ONLY the settlements processed up to (<=) this run's
+        // created_at. This way Part-1 alone shows PARTIAL even after Part-2 is
+        // later ingested and turns the live status to FULLY_SETTLED.
+        const runCreatedAt: string = runRecord?.created_at ?? '9999-12-31';
+
+        allTxns = rawTxns.map(txn => {
+          // Fetch all settlement records for this txn that were processed in
+          // runs created AT OR BEFORE the selected run.
+          const history = this.db.prepare(`
+            SELECT sh.settlement_amount, sh.settlement_type
+            FROM   settlement_history sh
+            JOIN   reconciliation_runs rr ON sh.run_id = rr.run_id
+            WHERE  sh.transaction_id = ?
+              AND  rr.created_at <= ?
+          `).all(txn.transaction_id, runCreatedAt) as { settlement_amount: number; settlement_type: string }[];
+
+          if (txn.status === 'FAILED' || txn.status === 'DECLINED') {
+            return { ...txn, settlement_status: 'NOT_APPLICABLE', total_settled_amount: 0 };
+          }
+
+          if (history.length === 0) {
+            return { ...txn, settlement_status: 'PENDING', total_settled_amount: 0 };
+          }
+
+          let netCents = 0;
+          let hasRefund = false;
+          for (const h of history) {
+            const c = Math.round(h.settlement_amount * 100);
+            if (h.settlement_type === 'DEBIT') { netCents += c; }
+            else { netCents -= c; hasRefund = true; }
+          }
+
+          const txnCents  = Math.round(txn.transaction_amount * 100);
+          const netAmount = netCents / 100;
+
+          let status: SettlementStatus;
+          if (hasRefund && netCents < txnCents)    { status = 'REFUNDED'; }
+          else if (netCents > txnCents)             { status = 'OVER_SETTLED'; }
+          else if (netCents === txnCents)           { status = 'FULLY_SETTLED'; }
+          else                                      { status = 'PARTIAL'; }
+
+          return { ...txn, settlement_status: status, total_settled_amount: netAmount };
+        });
+        // ─────────────────────────────────────────────────────────────────────
       } else {
         allTxns = [];
       }
