@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { getDatabase } from './db/index.js';
+import { runMigrations } from './db/migrations.js';
 
 const app = createApp();
 
@@ -8,6 +9,9 @@ const app = createApp();
 try {
   let db = getDatabase();
   
+  // Always run migrations to ensure all tables (including users) are created
+  runMigrations(db);
+
   // Check if transactions table exists
   const tableCheck = db.prepare(
     "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='transactions'"
