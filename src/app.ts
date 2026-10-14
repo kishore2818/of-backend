@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { authRouter } from './routes/auth.routes.js';
 import { reconciliationRouter } from './routes/reconciliation.routes.js';
 import { transactionRouter } from './routes/transaction.routes.js';
 import { dashboardRouter } from './routes/dashboard.routes.js';
@@ -20,6 +21,8 @@ export function createApp(): express.Application {
       version: '1.0.0',
       health: '/health',
       endpoints: {
+        auth_login: '/auth/login',
+        auth_me: '/auth/me',
         summary: '/dashboard/summary',
         transactions: '/transactions',
         exceptions: '/exceptions',
@@ -34,6 +37,7 @@ export function createApp(): express.Application {
   });
 
   // Mount API routers
+  app.use(authRouter);
   app.use(reconciliationRouter);
   app.use(transactionRouter);
   app.use(dashboardRouter);

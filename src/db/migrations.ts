@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import bcrypt from 'bcryptjs';
 
 export function runMigrations(db: Database.Database): void {
   // 1. Ensure core reconciliation_runs table exists
@@ -48,7 +49,27 @@ export function runMigrations(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_exception_reviews_txn ON exception_reviews(transaction_id);
+
+    CREATE TABLE IF NOT EXISTS users (
+      id VARCHAR(50) PRIMARY KEY,
+      email VARCHAR(100) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      name VARCHAR(100) NOT NULL,
+      role VARCHAR(50) DEFAULT 'admin',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+
+  // Default admin user check & seed (admin@openfabric.co / admin123)
+  try {
+    const hash = bcrypt.hashSync('admin123', 10);
+    db.prepare(`
+      INSERT OR IGNORE INTO users (id, email, password_hash, name, role)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('USR_ADMIN_CO', 'admin@openfabric.co', hash, 'Lead Financial Auditor', 'admin');
+  } catch (err) {
+    // Ignore migration error
+  }
 
   // 2. Safe additive column migrations on existing settlement_history
   try {

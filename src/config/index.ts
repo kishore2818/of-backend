@@ -11,5 +11,7 @@ export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   dbPath: process.env.DB_PATH || path.resolve(process.cwd(), 'data/reconciliation.db'),
   defaultEvaluationDate: process.env.EVALUATION_DATE || '2025-08-15',
-  corsOrigin: process.env.CORS_ORIGIN || '*'
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  jwtSecret: process.env.JWT_SECRET || 'openfabric_reconciliation_super_secure_jwt_secret_2026',
+  jwtExpiry: process.env.JWT_EXPIRY || '24h'
 };
