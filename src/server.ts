@@ -39,6 +39,6 @@ try {
   process.exit(1);
 }
 
-app.listen(config.port, () => {
-  console.log(`Transaction Reconciliation Backend running on http://localhost:${config.port}`);
+app.listen(config.port, '0.0.0.0', () => {
+  console.log(`Transaction Reconciliation Backend running on http://0.0.0.0:${config.port}`);
 });
