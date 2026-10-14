@@ -3,6 +3,7 @@ import cors from 'cors';
 import { reconciliationRouter } from './routes/reconciliation.routes.js';
 import { transactionRouter } from './routes/transaction.routes.js';
 import { dashboardRouter } from './routes/dashboard.routes.js';
+import { exceptionRouter } from './routes/exception.routes.js';
 
 export function createApp(): express.Application {
   const app = express();
@@ -20,6 +21,7 @@ export function createApp(): express.Application {
   app.use(reconciliationRouter);
   app.use(transactionRouter);
   app.use(dashboardRouter);
+  app.use(exceptionRouter);
 
   // 404 handler
   app.use((req, res) => {

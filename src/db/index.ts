@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { config } from '../config/index.js';
+import { runMigrations } from './migrations.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,6 +10,7 @@ export function getDatabase(customPath?: string): Database.Database {
   if (customPath) {
     const db = new Database(customPath);
     db.pragma('foreign_keys = ON');
+    runMigrations(db);
     return db;
   }
 
@@ -20,6 +22,7 @@ export function getDatabase(customPath?: string): Database.Database {
     }
     dbInstance = new Database(dbPath);
     dbInstance.pragma('foreign_keys = ON');
+    runMigrations(dbInstance);
   }
 
   return dbInstance;

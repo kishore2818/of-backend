@@ -43,6 +43,8 @@ export interface SettlementHistory {
   settlement_type: SettlementType;
   currency: string;
   processed_at?: string;
+  run_id?: string | null;
+  match_method?: 'PRIMARY_LIFECYCLE' | 'FALLBACK_COMPOSITE' | null;
 }
 
 export interface TransactionWithIssues extends Transaction {
@@ -82,11 +84,13 @@ export interface ReconciliationSummary {
   duplicatesSkipped: number;
   invalidRecords: number;
   unmatchedRecords: number;
+  ambiguousRecords?: number;
   transactionsUpdated: number;
 }
 
 export interface ReconciliationResult {
   success: boolean;
+  runId?: string;
   summary: ReconciliationSummary;
   errors: Array<{
     recordId?: string;
@@ -99,6 +103,106 @@ export interface ReconciliationResult {
     reason: string;
     record: Partial<ParsedSettlementRecord>;
   }>;
+}
+
+export type RunStatus = 'COMPLETED' | 'PARTIAL' | 'FAILED';
+
+export interface ReconciliationRun {
+  run_id: string;
+  file_name: string;
+  file_size_bytes: number;
+  status: RunStatus;
+  records_read: number;
+  matched_records: number;
+  new_settlements_inserted: number;
+  duplicates_skipped: number;
+  invalid_records: number;
+  unmatched_records: number;
+  ambiguous_records: number;
+  transactions_updated: number;
+  duration_ms: number;
+  error_message?: string | null;
+  created_at: string;
+}
+
+export type RunItemType = 'INVALID' | 'UNMATCHED' | 'AMBIGUOUS' | 'CONFLICT' | 'SKIPPED_DUPLICATE' | 'MATCHED';
+
+export interface ReconciliationRunItem {
+  id: number;
+  run_id: string;
+  row_number?: number | null;
+  settlement_id?: string | null;
+  item_type: RunItemType;
+  reason?: string | null;
+  raw_data?: string | null;
+  created_at?: string;
+}
+
+export type ExceptionReviewStatus = 'UNREVIEWED' | 'UNDER_REVIEW' | 'RESOLVED';
+
+export interface ExceptionReview {
+  exception_id: string;
+  transaction_id: string | null;
+  issue_code: string;
+  severity: IssueSeverity;
+  review_status: ExceptionReviewStatus;
+  notes?: string | null;
+  reviewed_by: string;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface ExceptionItem {
+  exception_id: string;
+  transaction_id: string | null;
+  merchant_name: string;
+  issue_type: string;
+  severity: IssueSeverity;
+  expected_amount: number;
+  net_settled_amount: number;
+  difference_amount: number;
+  detection_date: string;
+  review_status: ExceptionReviewStatus;
+  notes?: string | null;
+  recommendation: string;
+  description: string;
+  matching_method?: string | null;
+  settlement_count?: number;
+}
+
+export interface CSVPreviewRow {
+  row_number: number;
+  settlement_id: string;
+  lifecycle_id: string | null;
+  account_id: string;
+  merchant_name: string;
+  transaction_date: string;
+  settlement_date: string;
+  settlement_amount: number | null;
+  settlement_type: string;
+  currency: string;
+  status: 'VALID_MATCH' | 'POTENTIAL_UNMATCHED' | 'AMBIGUOUS' | 'CURRENCY_MISMATCH' | 'DUPLICATE' | 'CONFLICT' | 'INVALID';
+  status_message?: string;
+  matched_transaction_id?: string | null;
+}
+
+export interface CSVPreviewResult {
+  success: boolean;
+  fileName: string;
+  fileSizeBytes: number;
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  duplicateRows: number;
+  columnsFound: string[];
+  missingColumns: string[];
+  previewRows: CSVPreviewRow[];
+  errors: Array<{ rowNumber?: number; error: string }>;
+}
+
+export interface AgingBandMetrics {
+  count: number;
+  totalOutstanding: number;
 }
 
 export interface DashboardSummary {
@@ -118,8 +222,19 @@ export interface DashboardSummary {
     warningCount: number;
     cleanCount: number;
   };
+  agingBands: {
+    zeroToThreeDays: AgingBandMetrics;
+    fourToSevenDays: AgingBandMetrics;
+    overSevenDays: AgingBandMetrics;
+  };
   totalOutstandingAmount: number;
   totalSettledAmount: number;
+  totalExcessAmount: number;
   averageDaysToSettle: number;
   settlementRate: number; // percentage (0-100)
+  latestDate: string;
+  totalRuns: number;
+  unmatchedSettlementCount: number;
+  activeRunId?: string | null;
+  runDetails?: ReconciliationRun | null;
 }

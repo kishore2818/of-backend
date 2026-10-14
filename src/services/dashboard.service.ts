@@ -10,19 +10,65 @@ export class DashboardService {
     this.issueService = new IssueDetectionService();
   }
 
-  public getSummary(evaluationDate?: string): DashboardSummary {
-    const allTxns = this.db.prepare('SELECT * FROM transactions').all() as Transaction[];
-    const totalSettlementRecords = (
-      this.db.prepare('SELECT COUNT(*) as count FROM settlement_history').get() as { count: number }
-    ).count;
+  public getSummary(evaluationDate?: string, runId?: string): DashboardSummary {
+    const cleanRunId = (runId && runId.trim() !== '' && runId !== 'ALL') ? runId.trim() : null;
+    let allTxns: Transaction[] = [];
+    let totalSettlementRecords = 0;
+    let runRecord: any = null;
 
-    // Determine evaluation date: if not provided, find latest settlement_date or fallback to '2025-08-15'
-    let evalDate = evaluationDate;
-    if (!evalDate) {
-      const maxDateRow = this.db.prepare(
+    if (cleanRunId) {
+      try {
+        runRecord = this.db.prepare('SELECT * FROM reconciliation_runs WHERE run_id = ?').get(cleanRunId);
+      } catch (e) {}
+
+      const runTxnRows = this.db.prepare(
+        'SELECT DISTINCT transaction_id FROM settlement_history WHERE run_id = ? AND transaction_id IS NOT NULL'
+      ).all(cleanRunId) as { transaction_id: string }[];
+
+      let itemTxnRows: { transaction_id: string }[] = [];
+      try {
+        itemTxnRows = this.db.prepare(
+          'SELECT DISTINCT transaction_id FROM reconciliation_run_items WHERE run_id = ? AND transaction_id IS NOT NULL'
+        ).all(cleanRunId) as { transaction_id: string }[];
+      } catch (e) {}
+
+      const txnIds = Array.from(new Set([
+        ...runTxnRows.map(r => r.transaction_id),
+        ...itemTxnRows.map(r => r.transaction_id)
+      ]));
+
+      if (txnIds.length > 0) {
+        const placeholders = txnIds.map(() => '?').join(',');
+        allTxns = this.db.prepare(`SELECT * FROM transactions WHERE transaction_id IN (${placeholders})`).all(...txnIds) as Transaction[];
+      } else {
+        allTxns = [];
+      }
+
+      const countRow = this.db.prepare('SELECT COUNT(*) as count FROM settlement_history WHERE run_id = ?').get(cleanRunId) as { count: number };
+      totalSettlementRecords = countRow?.count || 0;
+    } else {
+      allTxns = this.db.prepare('SELECT * FROM transactions').all() as Transaction[];
+      const countRow = this.db.prepare('SELECT COUNT(*) as count FROM settlement_history').get() as { count: number };
+      totalSettlementRecords = countRow?.count || 0;
+    }
+
+    // Determine evaluation date: if not provided or empty, find latest settlement or transaction date
+    let evalDate: string;
+    if (evaluationDate && evaluationDate.trim() !== '') {
+      evalDate = evaluationDate.trim();
+    } else if (cleanRunId) {
+      const maxSettleRow = this.db.prepare(
+        'SELECT MAX(settlement_date) as maxDate FROM settlement_history WHERE run_id = ?'
+      ).get(cleanRunId) as { maxDate: string | null };
+      evalDate = maxSettleRow?.maxDate || (runRecord?.created_at ? runRecord.created_at.split(' ')[0] : '2026-10-13') || '2025-08-15';
+    } else {
+      const maxSettleRow = this.db.prepare(
         'SELECT MAX(settlement_date) as maxDate FROM settlement_history'
       ).get() as { maxDate: string | null };
-      evalDate = maxDateRow?.maxDate || '2025-08-15';
+      const maxTxnRow = this.db.prepare(
+        'SELECT MAX(COALESCE(last_settlement_date, transaction_date)) as maxDate FROM transactions'
+      ).get() as { maxDate: string | null };
+      evalDate = maxSettleRow?.maxDate || maxTxnRow?.maxDate || '2025-08-15';
     }
 
     const eligibleTxns = allTxns.filter(t => t.status !== 'FAILED' && t.status !== 'DECLINED');
@@ -36,14 +82,38 @@ export class DashboardService {
       notApplicable: 0
     };
 
+    const agingBands = {
+      zeroToThreeDays: { count: 0, totalOutstanding: 0 },
+      fourToSevenDays: { count: 0, totalOutstanding: 0 },
+      overSevenDays: { count: 0, totalOutstanding: 0 }
+    };
+
     let totalOutstandingCents = 0;
     let totalSettledCents = 0;
+    let totalExcessCents = 0;
     let criticalCount = 0;
     let warningCount = 0;
     let cleanCount = 0;
 
     let totalDaysToSettle = 0;
     let settledTxnCountForAvg = 0;
+
+    const evalDateObj = new Date(evalDate);
+
+    // Calculate run-scoped net settled volume if filtered by run
+    if (cleanRunId) {
+      const settleRows = this.db.prepare(
+        'SELECT settlement_amount, settlement_type FROM settlement_history WHERE run_id = ?'
+      ).all(cleanRunId) as { settlement_amount: number; settlement_type: string }[];
+      for (const s of settleRows) {
+        const sCents = toCents(s.settlement_amount);
+        if (s.settlement_type === 'DEBIT') {
+          totalSettledCents += sCents;
+        } else {
+          totalSettledCents -= sCents;
+        }
+      }
+    }
 
     for (const txn of allTxns) {
       const evaluated = this.issueService.evaluateTransaction(txn, evalDate);
@@ -78,11 +148,44 @@ export class DashboardService {
       }
 
       if (txn.status !== 'FAILED' && txn.status !== 'DECLINED') {
-        totalOutstandingCents += toCents(evaluated.outstanding_amount);
-        totalSettledCents += toCents(txn.total_settled_amount);
+        const outCents = toCents(evaluated.outstanding_amount);
+        totalOutstandingCents += outCents;
+        if (!cleanRunId) {
+          totalSettledCents += toCents(txn.total_settled_amount);
+        }
+
+        // Aging classification for transactions with outstanding amount
+        if (outCents > 0) {
+          const refDate = (txn.settlement_status === 'PARTIAL' && txn.last_settlement_date)
+            ? txn.last_settlement_date
+            : txn.transaction_date;
+          const refDateObj = new Date(refDate);
+          const diffDays = Math.max(0, Math.floor((evalDateObj.getTime() - refDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+
+          if (diffDays <= 3) {
+            agingBands.zeroToThreeDays.count++;
+            agingBands.zeroToThreeDays.totalOutstanding = fromCents(
+              toCents(agingBands.zeroToThreeDays.totalOutstanding) + outCents
+            );
+          } else if (diffDays <= 7) {
+            agingBands.fourToSevenDays.count++;
+            agingBands.fourToSevenDays.totalOutstanding = fromCents(
+              toCents(agingBands.fourToSevenDays.totalOutstanding) + outCents
+            );
+          } else {
+            agingBands.overSevenDays.count++;
+            agingBands.overSevenDays.totalOutstanding = fromCents(
+              toCents(agingBands.overSevenDays.totalOutstanding) + outCents
+            );
+          }
+        }
+
+        // Excess calculation for over-settled
+        if (txn.settlement_status === 'OVER_SETTLED') {
+          totalExcessCents += Math.max(0, toCents(txn.total_settled_amount) - toCents(txn.transaction_amount));
+        }
 
         // Average settlement time calculation:
-        // When transaction has achieved FULLY_SETTLED and has settlement date
         if (txn.settlement_status === 'FULLY_SETTLED' && txn.last_settlement_date) {
           const tDate = new Date(txn.transaction_date).getTime();
           const sDate = new Date(txn.last_settlement_date).getTime();
@@ -101,6 +204,27 @@ export class DashboardService {
       ? parseFloat(((statusBreakdown.fullySettled / eligibleTxns.length) * 100).toFixed(1))
       : 0;
 
+    let totalRuns = 0;
+    try {
+      const runRow = this.db.prepare('SELECT COUNT(*) as count FROM reconciliation_runs').get() as { count: number };
+      totalRuns = runRow?.count || 0;
+    } catch (e) {}
+
+    let unmatchedSettlementCount = 0;
+    try {
+      if (cleanRunId) {
+        const unmatchedRow = this.db.prepare(
+          "SELECT COUNT(*) as count FROM reconciliation_run_items WHERE run_id = ? AND item_type IN ('UNMATCHED', 'AMBIGUOUS', 'INVALID', 'CONFLICT')"
+        ).get(cleanRunId) as { count: number };
+        unmatchedSettlementCount = unmatchedRow?.count || 0;
+      } else {
+        const unmatchedRow = this.db.prepare(
+          "SELECT COUNT(*) as count FROM reconciliation_run_items WHERE item_type IN ('UNMATCHED', 'AMBIGUOUS')"
+        ).get() as { count: number };
+        unmatchedSettlementCount = unmatchedRow?.count || 0;
+      }
+    } catch (e) {}
+
     return {
       totalTransactions: allTxns.length,
       eligibleTransactions: eligibleTxns.length,
@@ -111,10 +235,17 @@ export class DashboardService {
         warningCount,
         cleanCount
       },
+      agingBands,
       totalOutstandingAmount: fromCents(totalOutstandingCents),
       totalSettledAmount: fromCents(totalSettledCents),
+      totalExcessAmount: fromCents(totalExcessCents),
       averageDaysToSettle: avgDays,
-      settlementRate
+      settlementRate,
+      latestDate: evalDate,
+      totalRuns,
+      unmatchedSettlementCount,
+      activeRunId: cleanRunId,
+      runDetails: runRecord || null
     };
   }
 }

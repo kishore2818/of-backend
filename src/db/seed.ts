@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { runMigrations } from './migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +21,9 @@ export function resetAndSeedDatabase(dbInstance?: Database.Database): void {
   } else {
     // Fallback embedded SQL
     schemaSql = `
+      DROP TABLE IF EXISTS exception_reviews;
+      DROP TABLE IF EXISTS reconciliation_run_items;
+      DROP TABLE IF EXISTS reconciliation_runs;
       DROP TABLE IF EXISTS settlement_history;
       DROP TABLE IF EXISTS transactions;
       CREATE TABLE transactions (
@@ -80,4 +84,5 @@ export function resetAndSeedDatabase(dbInstance?: Database.Database): void {
 
   db.exec(schemaSql);
   db.exec(seedSql);
+  runMigrations(db);
 }

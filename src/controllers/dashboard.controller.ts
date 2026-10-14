@@ -8,13 +8,15 @@ export class DashboardController {
     try {
       const db = getDatabase();
       const dashboardService = new DashboardService(db);
-      const evaluationDate = (req.query.evaluationDate as string) || config.defaultEvaluationDate;
+      const rawDate = req.query.evaluationDate as string;
+      const evaluationDate = (rawDate && rawDate.trim() !== '') ? rawDate.trim() : undefined;
+      const rawRunId = req.query.runId as string | undefined;
 
-      const summary = dashboardService.getSummary(evaluationDate);
+      const summary = dashboardService.getSummary(evaluationDate, rawRunId);
 
       res.status(200).json({
         success: true,
-        evaluationDate,
+        evaluationDate: summary.latestDate,
         data: summary
       });
     } catch (err: any) {
