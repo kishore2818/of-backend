@@ -3,11 +3,11 @@
 > ⚡ **Deployment Notice**: This repository is dedicated solely to the **Backend Deployment Service** of the Open Fabric Transaction Reconciliation Platform (hosted on Render).
 >
 > 📁 **Main Repository & Test Datasets**: For the complete monorepo, architectural documentation, and all individual test scenario CSV files (`scenario_1.csv` through `scenario_7.csv`, plus `all_scenarios_1_to_7.csv`), please visit the **Main Monorepo**:  
-> 👉 **[OF-assement-backup on GitHub](https://github.com/kishore2818/OF-assement-backup)**
+> 👉 **[OF-assement on GitHub](https://github.com/kishore2818/OF-assement)**
 
 [![Live Backend API](https://img.shields.io/badge/⚡%20Backend%20API-Render%20Online-0F1B4C?style=for-the-badge&logo=render&logoColor=white)](https://of-backend.onrender.com)
 [![Live Frontend App](https://img.shields.io/badge/🌐%20Live%20App-Vercel%20Online-1EC8A5?style=for-the-badge&logo=vercel&logoColor=white)](https://of-frontend.vercel.app/)
-[![Main Monorepo](https://img.shields.io/badge/📦%20Main%20Repo-OF--assement--backup-0F1B4C?style=for-the-badge&logo=github&logoColor=white)](https://github.com/kishore2818/OF-assement-backup)
+[![Main Monorepo](https://img.shields.io/badge/📦%20Main%20Repo-OF--assement-0F1B4C?style=for-the-badge&logo=github&logoColor=white)](https://github.com/kishore2818/OF-assement)
 
 ---
 
@@ -20,7 +20,7 @@
 
 ## 🧪 Testing Scenarios (Deployed & Local)
 
-You can test all business reconciliation scenarios using the pre-packaged dataset CSV files located in the [Main Monorepo](https://github.com/kishore2818/OF-assement-backup):
+You can test all business reconciliation scenarios using the pre-packaged dataset CSV files located in the [Main Monorepo](https://github.com/kishore2818/OF-assement):
 
 | Scenario | Dataset File | Description |
 | :--- | :--- | :--- |
