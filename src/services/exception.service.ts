@@ -248,20 +248,31 @@ export class ExceptionService {
       'recommendation'
     ];
 
-    const rows = list.map(e => [
-      e.exception_id,
-      e.transaction_id || '',
-      `"${e.merchant_name.replace(/"/g, '""')}"`,
-      e.issue_type,
-      e.severity,
-      formatMoney(e.expected_amount),
-      formatMoney(e.net_settled_amount),
-      formatMoney(e.difference_amount),
-      e.detection_date,
-      e.review_status,
-      `"${(e.notes || '').replace(/"/g, '""')}"`,
-      `"${e.recommendation.replace(/"/g, '""')}"`
-    ]);
+    const rows = list.map(e => {
+      let sevBadge: string = e.severity;
+      if (e.severity === 'CRITICAL') sevBadge = '🔴 CRITICAL';
+      else if (e.severity === 'WARNING') sevBadge = '🟡 WARNING';
+
+      let statusBadge: string = e.review_status;
+      if (e.review_status === 'RESOLVED') statusBadge = '🟢 RESOLVED';
+      else if (e.review_status === 'UNDER_REVIEW') statusBadge = '🟡 UNDER_REVIEW';
+      else if (e.review_status === 'UNREVIEWED') statusBadge = '⚪ UNREVIEWED';
+
+      return [
+        e.exception_id,
+        e.transaction_id || '',
+        `"${e.merchant_name.replace(/"/g, '""')}"`,
+        e.issue_type,
+        `"${sevBadge}"`,
+        formatMoney(e.expected_amount),
+        formatMoney(e.net_settled_amount),
+        formatMoney(e.difference_amount),
+        e.detection_date,
+        `"${statusBadge}"`,
+        `"${(e.notes || '').replace(/"/g, '""')}"`,
+        `"${e.recommendation.replace(/"/g, '""')}"`
+      ];
+    });
 
     return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   }

@@ -333,11 +333,26 @@ export class TransactionController {
         'total_settled_amount',
         'outstanding_amount',
         'issue_severity',
-        'issues_count'
+        'issues_count',
+        'issues_summary'
       ];
 
       const csvRows = [headers.join(',')];
       evaluated.forEach(t => {
+        let statusBadge: string = t.settlement_status;
+        if (t.settlement_status === 'FULLY_SETTLED') statusBadge = '🟢 FULLY_SETTLED';
+        else if (t.settlement_status === 'PARTIAL') statusBadge = '🟡 PARTIAL';
+        else if (t.settlement_status === 'OVER_SETTLED') statusBadge = '🔴 OVER_SETTLED';
+        else if (t.settlement_status === 'REFUNDED') statusBadge = '🟣 REFUNDED';
+        else if (t.settlement_status === 'PENDING') statusBadge = '⚪ PENDING';
+
+        let severityBadge: string = t.primary_issue_severity;
+        if (t.primary_issue_severity === 'CRITICAL') severityBadge = '🔴 CRITICAL';
+        else if (t.primary_issue_severity === 'WARNING') severityBadge = '🟡 WARNING';
+        else severityBadge = '🟢 CLEAR';
+
+        const issuesSummary = t.issues.map(i => `[${i.code}] ${i.description}`).join('; ');
+
         const row = [
           t.transaction_id,
           t.lifecycle_id || '',
@@ -347,11 +362,12 @@ export class TransactionController {
           formatMoney(t.transaction_amount),
           t.currency,
           t.status,
-          t.settlement_status,
+          `"${statusBadge}"`,
           formatMoney(t.total_settled_amount),
           formatMoney(t.outstanding_amount),
-          t.primary_issue_severity,
-          t.issues.length
+          `"${severityBadge}"`,
+          t.issues.length,
+          `"${issuesSummary.replace(/"/g, '""')}"`
         ];
         csvRows.push(row.join(','));
       });
@@ -389,15 +405,17 @@ export class TransactionController {
 
       const csvRows = [headers.join(',')];
       settlements.forEach(s => {
+        const typeBadge = s.settlement_type === 'DEBIT' ? '🟢 DEBIT' : '🟣 CREDIT';
+        const methodBadge = s.match_method === 'PRIMARY_LIFECYCLE' ? '🔹 PRIMARY_LIFECYCLE' : '🔸 FALLBACK_COMPOSITE';
         const row = [
           s.settlement_id,
           s.transaction_id || '',
           s.lifecycle_id || '',
           s.settlement_date,
           formatMoney(s.settlement_amount),
-          s.settlement_type,
+          `"${typeBadge}"`,
           s.currency,
-          s.match_method || '',
+          `"${methodBadge}"`,
           s.run_id || '',
           s.processed_at || ''
         ];

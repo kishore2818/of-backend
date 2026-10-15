@@ -14,7 +14,7 @@
 ## 🌐 Live Production Endpoints
 - **Base Backend API**: `https://of-backend.onrender.com`
 - **Frontend Dashboard**: `https://of-frontend.vercel.app`
-- **Default Auditor Login**: Username `admin` | Password `admin`
+- **Default Auditor Login**: Email `admin@openfabric.co` | Password `admin123`
 
 ---
 
