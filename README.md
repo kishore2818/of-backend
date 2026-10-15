@@ -46,6 +46,7 @@ npm install
 
 # 2. Start local backend server (port 4000)
 npm run dev
+# Server runs on http://localhost:4000
 
 # 3. Run automated test suite
 npm test
